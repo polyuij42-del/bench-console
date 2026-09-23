@@ -120,10 +120,11 @@ function svcKey(port) {
 }
 // 被测引擎的基址。默认本机 127.0.0.1:<port>；config.json 里给服务写 baseUrl
 // 即可指向别的机器或 Docker 容器，如 "baseUrl": "http://192.168.1.50:8000"
-function baseUrl(port) {
-  const s = svc(port);
-  const b = (s && s.baseUrl) || ('http://127.0.0.1:' + port);
-  return String(b).replace(/\/+$/, '');
+function baseUrl(k) {
+  const s = svc(k);
+  if (s && s.baseUrl) return String(s.baseUrl).replace(/\/+$/, '');
+  // k 可能是服务 id（非数字）——默认回退必须用解析出来的 port，不能拿 id 拼 URL
+  return 'http://127.0.0.1:' + (s ? s.port : k);
 }
 function parseMetrics(text) {
   const out = {};
@@ -767,6 +768,8 @@ h1 .logo{color:var(--ac)}
 .dot.ok{background:var(--ok)}
 label{display:block;font-size:12px;color:var(--tx2);margin:12px 0 5px;font-weight:500}
 input,select{width:100%;background:#fff;border:1px solid var(--bd2);color:var(--tx);border-radius:7px;padding:7px 10px;font-size:13px;outline:none;transition:.15s}
+/* 复选框不吃上面的 width:100%（否则在 flex label 里会把文字挤成一列竖排），边框/内边距也不适用 */
+input[type=checkbox]{width:auto;flex:0 0 auto;padding:0;border:none;accent-color:var(--ac);vertical-align:middle}
 input:focus,select:focus{border-color:var(--ac);box-shadow:0 0 0 3px rgba(59,110,245,.12)}
 .row{display:flex;gap:10px}.row>*{flex:1}
 .chips{display:flex;gap:6px;flex-wrap:wrap}
@@ -969,11 +972,13 @@ function j(){try{return JSON.stringify([].slice.call(arguments))}catch(e){return
 function loadSvcs(){
   fetch('/api/services').then(r=>r.json()).then(function(list){
     var w=document.getElementById('svcs'); w.innerHTML='';
+    // 默认选中第一个「活着」的服务；全都不在线才退回第一个条目
+    var defIdx=0;for(var k=0;k<list.length;k++){if(list[k].healthy){defIdx=k;break;}}
     list.forEach(function(s,i){
-      var d=h('div','svc'+(i===0?' sel':''));
+      var d=h('div','svc'+(i===defIdx?' sel':''));
       d.innerHTML='<span class="dot'+(s.healthy?' ok':'')+'"></span><span class="nm">'+s.name+'</span><div class="ds">'+s.desc+(s.model?' · '+s.model:' · 未响应')+'</div>';
       d.onclick=function(){if(running)return;document.querySelectorAll('.svc').forEach(function(x){x.classList.remove('sel')});d.classList.add('sel');selSvc=s;selModel=s.model;};
-      if(i===0){selSvc=s;selModel=s.model;}
+      if(i===defIdx){selSvc=s;selModel=s.model;}
       w.appendChild(d);
     });
   });
@@ -1058,6 +1063,8 @@ function poll(){
     }else if(s.stage==='settle'){tx='静置预热中…';}
     document.getElementById('pbar').style.width=pct+'%';
     document.getElementById('progTx').textContent=tx+(s.error?(' ⚠ '+s.error):'');
+    // 渲染段整体 try/catch：任何一处抛错（如数据字段缺失）只跳过本帧，不能把轮询链炸掉
+    try{
     renderLive(s);
     renderEvents(s);
     if(s.single&&Object.keys(s.single).length){var g1=j(s.single,s.order);if(g1!==sig.single){sig.single=g1;cur.single=s.single;cur.order=s.order||Object.keys(s.single);renderSingle();}}
@@ -1065,6 +1072,7 @@ function poll(){
     if(s.prefill&&Object.keys(s.prefill).length){var g3=j(s.prefill);if(g3!==sig.prefill){sig.prefill=g3;cur.prefill=s.prefill;renderPf();}}
     if(s.summary){var g4=j(s.summary);if(g4!==sig.summary){sig.summary=g4;cur.summary=s.summary;renderStats();}}
     if(s.final){var g5=j(s.final);if(g5!==sig.fin){sig.fin=g5;renderFinal(s.final,wasRunning);}}
+    }catch(e){if(window.console&&console.warn)console.warn('[bench-console] render error:',e&&e.message)}
     wasRunning=running;
     if(running)setTimeout(poll,1000);else loadLive();
   });
@@ -1181,13 +1189,14 @@ function renderFinal(f,doScroll){
 }
 function renderStats(){
   var w=document.getElementById('sgStats');w.innerHTML='';
+  var sm=cur.summary||{}; // 运行中 summary 还没生成，别在这抛错（一抛整条轮询链就死）
   var singleMean=null;
   if(cur.single&&cur.order){var arr=cur.order.map(function(id){return (cur.single[id]||{}).meanTps}).filter(Boolean);singleMean=arr.length?(arr.reduce(function(a,b){return a+b},0)/arr.length):null;}
   var pfBest=null;
   if(cur.prefill){var ks=Object.keys(cur.prefill);if(ks.length){var v=ks.map(function(k){return cur.prefill[k].meanPtps||0});pfBest=Math.max.apply(null,v);}}
   [[singleMean?singleMean.toFixed(1):'—','单流均值 tok/s'],
-   [cur.summary.accept!=null?cur.summary.accept+'%':'—','投机接受率'],
-   [cur.summary.prefixHit!=null?cur.summary.prefixHit+'%':'—','前缀缓存命中'],
+   [sm.accept!=null?sm.accept+'%':'—','投机接受率'],
+   [sm.prefixHit!=null?sm.prefixHit+'%':'—','前缀缓存命中'],
    [pfBest?pfBest+' tok/s':'—','prefill 峰值档']
   ].forEach(function(it){
     var d=h('div','stat');d.innerHTML='<div class="v">'+(it[0]||'—')+'</div><div class="l">'+it[1]+'</div>';w.appendChild(d);
