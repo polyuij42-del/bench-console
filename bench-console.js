@@ -645,7 +645,7 @@ async function runBench(params) {
         const cal = await streamPrefill(port, model, buildPrefillPrompt(1024, 997, ratio), runAc.signal);
         if (cal.promptTokens) ratio = Math.round(1024 * 2.7) / cal.promptTokens;
       } catch {}
-      const lens = prefill.lengths.filter(n => n >= 256 && n <= 131072).sort((a, b) => a - b);
+      const lens = prefill.lengths.filter(n => n >= 256 && n <= 1048576).sort((a, b) => a - b);
       for (let li = 0; li < lens.length; li++) {
         const target = lens[li];
         state.stage = 'prefill';
@@ -1111,8 +1111,8 @@ document.querySelectorAll('#modeChips .chip').forEach(function(c){
 function readConc(){selConc=[];document.querySelectorAll('#conc .chip').forEach(function(c){if(c.classList.contains('on'))selConc.push(+c.dataset.c)});}
 readConc();
 // prefill length chips
-[1024,4096,16384,32768,65536].forEach(function(n){
-  var el=h('span','chip'+(selPf.indexOf(n)>=0?' on':''),fmtK(n));el.dataset.n=n;
+[1024,4096,16384,32768,65536,131072,262144].forEach(function(n){
+  var el=h('span','chip'+(selPf.indexOf(n)>=0?' on':''),fmtK(n));el.dataset.n=n;el.title='约 '+n+' tokens 提示词，服务端 max-model-len 必须 >= 该值';
   el.onclick=function(){el.classList.toggle('on');readPf();};
   document.getElementById('pfLens').appendChild(el);
 });
