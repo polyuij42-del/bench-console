@@ -416,6 +416,9 @@ async function runBench(params) {
       try { prompts = JSON.parse(fs.readFileSync(promptPath(suite), 'utf8')); } catch {}
       if (!prompts.length) throw new Error(`prompt 文件加载失败或为空：${promptPath(suite)}`);
       state.order = prompts.map(p => p.id);
+      // id → 中文名映射：没测到的类型图表标签也能显示中文（否则回退成英文 id）
+      state.names = {};
+      prompts.forEach(p => { state.names[p.id] = p.name || p.id; });
     }
     // 3. settle
     state.stage = 'settle';
@@ -1067,7 +1070,7 @@ function poll(){
     try{
     renderLive(s);
     renderEvents(s);
-    if(s.single&&Object.keys(s.single).length){var g1=j(s.single,s.order);if(g1!==sig.single){sig.single=g1;cur.single=s.single;cur.order=s.order||Object.keys(s.single);renderSingle();}}
+    if(s.single&&Object.keys(s.single).length){var g1=j(s.single,s.order);if(g1!==sig.single){sig.single=g1;cur.single=s.single;cur.order=s.order||Object.keys(s.single);cur.names=s.names||cur.names||{};renderSingle();}}
     if(s.conc&&Object.keys(s.conc).length){var g2=j(s.conc);if(g2!==sig.conc){sig.conc=g2;cur.conc=s.conc;renderConc();}}
     if(s.prefill&&Object.keys(s.prefill).length){var g3=j(s.prefill);if(g3!==sig.prefill){sig.prefill=g3;cur.prefill=s.prefill;renderPf();}}
     if(s.summary){var g4=j(s.summary);if(g4!==sig.summary){sig.summary=g4;cur.summary=s.summary;renderStats();}}
@@ -1213,7 +1216,7 @@ function renderSingle(){
   });
   t.innerHTML=html;
   if(window.Chart){
-    var labels=cur.order.map(function(id){return (cur.single[id]||{}).name||id});
+    var labels=cur.order.map(function(id){return (cur.names&&cur.names[id])||(cur.single[id]||{}).name||id});
     var data=cur.order.map(function(id){return (cur.single[id]||{}).meanTps||0});
     var dd={labels:labels,datasets:[{label:'tok/s',data:data,backgroundColor:'rgba(59,110,245,.75)',borderRadius:5}]};
     if(chartS){chartS.data=dd;chartS.update('none');}
