@@ -1,0 +1,33 @@
+# Bench Console —— systemd user 服务模板（Linux）
+#
+# 安装步骤（以用户 poly 为例，按需替换路径与用户名）：
+#   1. 把仓库放到 /home/poly/bench-console（或任意路径，改下面 4 处路径）
+#   2. cp /home/poly/bench-console/scripts/bench-console.service ~/.config/systemd/user/
+#   3. systemctl --user daemon-reload
+#   4. systemctl --user enable --now bench-console
+#   5. 让服务在用户未登录时也常驻： sudo loginctl enable-linger $USER
+#
+# 常用命令：
+#   systemctl --user restart bench-console
+#   systemctl --user status  bench-console
+#   journalctl --user -u bench-console -f
+
+[Unit]
+Description=Bench Console (LLM inference benchmark dashboard)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/poly/bench-console
+ExecStart=/usr/bin/node /home/poly/bench-console/bench-console.js
+Restart=always
+RestartSec=5
+# 端口 / 监听地址也可以用环境变量覆盖（优先级高于 config.json）
+#Environment=BENCH_PORT=18777
+#Environment=BENCH_HOST=0.0.0.0
+
+StandardOutput=append:/home/poly/bench-console/server.log
+StandardError=append:/home/poly/bench-console/server-error.log
+
+[Install]
+WantedBy=default.target

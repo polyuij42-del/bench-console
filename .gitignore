@@ -1,0 +1,23 @@
+# ---- 本地配置（从 config.example.json 复制而来，不入库）----
+config.json
+config.local.json
+
+# ---- 测试结果 ----
+results/
+
+# ---- 运行时杂物 ----
+node_modules/
+npm-debug.log*
+server.log
+server-error.log
+
+# ---- 编辑器 / 系统 ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# ---- 本地调试残留 ----
+chrome*.log
+*.log

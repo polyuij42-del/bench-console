@@ -1,0 +1,53 @@
+{
+  "name": "bench-console",
+  "version": "2.2.1",
+  "description": "Zero-dependency, single-file web console that benchmarks any OpenAI-compatible LLM inference server (vLLM / SGLang / llama.cpp). Measures decode throughput, TTFT, concurrency scaling, prefix-cache hits and speculative-decoding acceptance.",
+  "license": "MIT",
+  "author": "poly (https://github.com/polyuij42-del)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/polyuij42-del/bench-console.git"
+  },
+  "homepage": "https://github.com/polyuij42-del/bench-console#readme",
+  "bugs": {
+    "url": "https://github.com/polyuij42-del/bench-console/issues"
+  },
+  "main": "bench-console.js",
+  "bin": {
+    "bench-console": "./bench-console.js"
+  },
+  "scripts": {
+    "start": "node bench-console.js",
+    "check": "node --check bench-console.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bench-console.js",
+    "assets/",
+    "prompts/",
+    "scripts/",
+    "config.example.json",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "vllm",
+    "sglang",
+    "llama.cpp",
+    "llm",
+    "benchmark",
+    "inference",
+    "ttft",
+    "throughput",
+    "tokens-per-second",
+    "dashboard",
+    "openai-compatible",
+    "speculative-decoding",
+    "prefix-cache"
+  ],
+  "dependencies": {},
+  "devDependencies": {}
+}

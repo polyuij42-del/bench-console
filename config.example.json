@@ -1,0 +1,35 @@
+{
+  "_readme": [
+    "复制成 config.json 再改： cp config.example.json config.json",
+    "config.json 已被 .gitignore 忽略，你的本地改动不会污染仓库。",
+    "所有字段都可省略，省略即用内置默认值。"
+  ],
+
+  "port": 18777,
+  "host": "0.0.0.0",
+  "resultsDir": "results",
+
+  "_prompts": "测试提示词库。键是 UI 上的「测试集」代号；路径相对仓库根目录，也可以写绝对路径。",
+  "prompts": {
+    "13": "prompts/prompts13.json",
+    "6": "prompts/prompts6.json"
+  },
+
+  "_services": [
+    "被测推理服务列表。改这里就是改 UI 左侧的「服务选择」。",
+    "id     必填且唯一。内部身份标识，同一 port 挂多个服务时靠它区分",
+    "port   必填。若填了 baseUrl，此处的 port 只作为展示与兜底用",
+    "name   显示名",
+    "desc   说明文字",
+    "baseUrl 可选。不写 = http://127.0.0.1:<port>；写了可指向别的机器或 Docker 容器",
+    "apiKey  可选。服务端开了 --api-key 时填，仅服务端使用，不会下发到浏览器"
+  ],
+  "services": [
+    {
+      "id": "8000",
+      "port": 8000,
+      "name": "Local vLLM",
+      "desc": "本机 8000 端口的 OpenAI 兼容端点"
+    }
+  ]
+}
