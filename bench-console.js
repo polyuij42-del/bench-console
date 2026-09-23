@@ -21,6 +21,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const net = require('net');
 
 // ---------- 配置层 ----------
 // 查找顺序（先命中者胜）：BENCH_CONFIG 指定的文件 → ./config.json → 内置默认值
@@ -86,7 +87,100 @@ function promptPath(suite) {
 }
 const MODES = ['single', 'conc', 'prefill'];
 const MODE_NAMES = { single: '单流解码 · 13类', conc: '并发档位', prefill: '预填充 · TTFT' };
-const SERVICES = CONFIG.services;
+const STATIC_SERVICES = CONFIG.services.map(s => ({ ...s }));
+let SERVICES = CONFIG.services;
+
+/* ===== 自动服务发现（可选，默认关）=====
+ * config.json 加：
+ *   "discovery": { "enabled": true, "ranges": [[18000,18500]], "extra": [], "exclude": [], "intervalSec": 15, "host": "127.0.0.1" }
+ * 扫描到的端口若已在 services 里（按 port 判重）则跳过，不再重复出现。
+ */
+const DISCOVERY = Object.assign({
+  enabled: false, ranges: [], extra: [], exclude: [], intervalSec: 15, host: '127.0.0.1', probeMs: 250,
+}, CONFIG.discovery || {});
+const AUTO_STATE = new Map();   // port -> { healthy, model }
+
+function tcpOpen(port, ms) {
+  return new Promise(resolve => {
+    const sk = new net.Socket();
+    let done = false;
+    const fin = v => { if (done) return; done = true; try { sk.destroy(); } catch {} resolve(v); };
+    sk.setTimeout(ms);
+    sk.once('connect', () => fin(true));
+    sk.once('timeout', () => fin(false));
+    sk.once('error', () => fin(false));
+    try { sk.connect(port, DISCOVERY.host); } catch { fin(false); }
+  });
+}
+
+async function mapLimit(items, n, fn) {
+  const out = new Array(items.length);
+  let i = 0;
+  const workers = [];
+  for (let w = 0; w < Math.min(n, items.length); w++) {
+    workers.push((async () => { while (i < items.length) { const k = i++; out[k] = await fn(items[k]); } })());
+  }
+  await Promise.all(workers);
+  return out;
+}
+
+async function probeModel(port) {
+  try {
+    const r = await fetchWithTimeout(`http://127.0.0.1:${port}/v1/models`, 2500);
+    if (!r.ok) return { healthy: false, model: null };
+    const j = await r.json();
+    return { healthy: true, model: (j.data && j.data[0] && j.data[0].id) || null };
+  } catch { return { healthy: false, model: null }; }
+}
+
+function discoveryPorts() {
+  const set = new Set();
+  for (const p of DISCOVERY.extra || []) set.add(Number(p));
+  for (const r of DISCOVERY.ranges || []) { const a = +r[0], b = +r[1]; for (let p = a; p <= b; p++) set.add(p); }
+  for (const p of DISCOVERY.exclude || []) set.delete(Number(p));
+  set.delete(Number(APP_PORT));
+  return [...set].filter(p => Number.isFinite(p) && p > 0 && p < 65536);
+}
+
+function syncServices() {
+  const statics = STATIC_SERVICES.map(s => ({ ...s }));
+  const staticPorts = new Set(statics.map(s => Number(s.port)));
+  const autos = [];
+  for (const [port, st] of AUTO_STATE) {
+    if (staticPorts.has(port) || !st.healthy) continue;
+    autos.push({
+      id: `auto-${port}`, port, name: `${port} · 自动发现`,
+      desc: `自动发现 · ${st.model || 'OpenAI 兼容端点'}`,
+      auto: true, _healthy: true, _model: st.model,
+    });
+  }
+  autos.sort((a, b) => a.port - b.port);
+  SERVICES = statics.concat(autos);
+}
+
+let _scanning = false;
+async function scanOnce() {
+  if (_scanning) return;
+  _scanning = true;
+  try {
+    const ports = discoveryPorts();
+    const res = await mapLimit(ports, 64, async p => ({ p, ok: await tcpOpen(p, DISCOVERY.probeMs) }));
+    const alive = new Set(res.filter(x => x.ok).map(x => x.p));
+    await mapLimit([...alive], 16, async p => { AUTO_STATE.set(p, await probeModel(p)); });
+    for (const p of ports) if (!alive.has(p)) AUTO_STATE.delete(p);
+    syncServices();
+  } catch (e) {
+    console.error('[bench-console] 自动发现扫描失败：' + (e && e.message));
+  } finally { _scanning = false; }
+}
+
+function startDiscovery() {
+  if (!DISCOVERY.enabled) return;
+  const n = discoveryPorts().length;
+  console.log(`[bench-console] 自动发现：扫描 ${n} 个端口，每 ${Math.max(5, +DISCOVERY.intervalSec || 15)}s 一次`);
+  scanOnce();
+  setInterval(scanOnce, Math.max(5, +DISCOVERY.intervalSec || 15) * 1000);
+}
 
 fs.mkdirSync(RESULT_DIR, { recursive: true });
 
@@ -663,10 +757,13 @@ async function handleApi(req, res, url) {
     const out = [];
     for (const s of SERVICES) {
       let healthy = false, model = null;
-      try {
-        const r = await fetchWithTimeout(`${baseUrl(s.id)}/v1/models`, 2500, svcKey(s.id));
-        if (r.ok) { const j = await r.json(); model = j.data && j.data[0] && j.data[0].id; healthy = true; }
-      } catch {}
+      if (s.auto) { healthy = !!s._healthy; model = s._model || null; }
+      else {
+        try {
+          const r = await fetchWithTimeout(`${baseUrl(s.id)}/v1/models`, 2500, svcKey(s.id));
+          if (r.ok) { const j = await r.json(); model = j.data && j.data[0] && j.data[0].id; healthy = true; }
+        } catch {}
+      }
       out.push({ ...publicSvc(s), healthy, model });
     }
     return json(res, 200, out);
@@ -976,10 +1073,13 @@ function loadSvcs(){
   fetch('/api/services').then(r=>r.json()).then(function(list){
     var w=document.getElementById('svcs'); w.innerHTML='';
     // 默认选中第一个「活着」的服务；全都不在线才退回第一个条目
+    var keepId=(selSvc&&selSvc.id)||null;
     var defIdx=0;for(var k=0;k<list.length;k++){if(list[k].healthy){defIdx=k;break;}}
+    // 已手选过则保持选中，不被自动刷新的列表冲掉
+    if(keepId){for(var k=0;k<list.length;k++){if(list[k].id===keepId){defIdx=k;break;}}}
     list.forEach(function(s,i){
       var d=h('div','svc'+(i===defIdx?' sel':''));
-      d.innerHTML='<span class="dot'+(s.healthy?' ok':'')+'"></span><span class="nm">'+s.name+'</span><div class="ds">'+s.desc+(s.model?' · '+s.model:' · 未响应')+'</div>';
+      d.innerHTML='<span class="dot'+(s.healthy?' ok':'')+'"></span><span class="nm">'+s.name+(s.auto?' <span style="font-size:10px;padding:0 4px;border:1px solid #88887d;border-radius:3px;opacity:.7;vertical-align:middle">AUTO</span>':'')+'</span><div class="ds">'+s.desc+(s.model?' · '+s.model:' · 未响应')+'</div>';
       d.onclick=function(){if(running)return;document.querySelectorAll('.svc').forEach(function(x){x.classList.remove('sel')});d.classList.add('sel');selSvc=s;selModel=s.model;};
       if(i===defIdx){selSvc=s;selModel=s.model;}
       w.appendChild(d);
@@ -1489,7 +1589,7 @@ function loadLive(){
     document.getElementById('live').innerHTML='前缀缓存命中：<b>'+(m.prefixHit!=null?m.prefixHit+'%':'—')+'</b><br>投机接受率：<b>'+(m.accept!=null?m.accept+'%':'—')+'</b>';
   });
 }
-loadSvcs();loadLive();setInterval(loadLive,5000);poll();
+loadSvcs();loadLive();setInterval(loadLive,5000);poll();setInterval(function(){if(!running)loadSvcs();},10000);
 <\/script></body></html>`;
 
 // ---------- server ----------
@@ -1525,4 +1625,5 @@ server.listen(APP_PORT, APP_HOST, () => {
   console.log(`[bench-console] services ${SERVICES.length} 个: ${SERVICES.map(s => `${s.id}${s.baseUrl ? ' → ' + s.baseUrl : ''}`).join(' | ')}`);
   console.log(`[bench-console] prompts  ${promptPath('13')}  ${promptPath('6')}`);
   console.log(`[bench-console] results  ${RESULT_DIR}`);
+  startDiscovery();
 });

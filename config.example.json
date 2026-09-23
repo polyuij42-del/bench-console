@@ -31,5 +31,26 @@
       "name": "Local vLLM",
       "desc": "本机 8000 端口的 OpenAI 兼容端点"
     }
-  ]
+  ],
+
+  "_discovery": [
+    "可选。自动服务发现：定期扫端口段，发现新的 OpenAI 兼容端点就自动加进服务列表（UI 上带 AUTO 标记），停掉的服务会自动移除。",
+    "enabled     默认 false（不写就是关）。开了才会扫",
+    "ranges      要扫的端口段数组，如 [[18000,18500]]",
+    "extra       段外额外要扫的端口",
+    "exclude     要跳过的端口（bench-console 自己的端口会自动跳过）",
+    "intervalSec 扫描间隔秒数，最小 5，默认 15",
+    "host        探测目标主机，默认 127.0.0.1",
+    "probeMs     单端口 TCP 连接超时毫秒，默认 250",
+    "已在 services 里出现过的端口不会被重复添加（按 port 判重）。"
+  ],
+  "discovery": {
+    "enabled": false,
+    "ranges": [[18000, 18500]],
+    "extra": [],
+    "exclude": [],
+    "intervalSec": 15,
+    "host": "127.0.0.1",
+    "probeMs": 250
+  }
 }
