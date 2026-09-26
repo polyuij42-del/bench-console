@@ -297,7 +297,7 @@ async function streamChat(port, model, prompt, maxTokens, temperature, signal, c
   let ttft = null, tokens = 0;
   const body = JSON.stringify({
     model, messages: [{ role: 'user', content: prompt }],
-    max_tokens: maxTokens, temperature: (temperature == null || !Number.isFinite(+temperature)) ? 1.0 : +temperature, stream: true,
+    max_tokens: maxTokens, temperature: (temperature == null || !Number.isFinite(+temperature)) ? 0 : +temperature, stream: true,
     stream_options: { include_usage: true },
   });
   const res = await fetch(`${baseUrl(port)}/v1/chat/completions`, {
@@ -477,7 +477,7 @@ async function runBench(params) {
   const { model, suite, reps, concLevels, maxTokens, settle, repSettle, tag, prefill } = params;
   // 采样温度：缺省 1.0（Qwen3.8 官方思考模式推荐）；历史版本硬编码 0（贪心），对比旧数据时注意口径
   const temperature = (params.temperature == null || params.temperature === '' || !Number.isFinite(+params.temperature))
-    ? 1.0 : Math.min(2, Math.max(0, +params.temperature));
+    ? 0 : Math.min(2, Math.max(0, +params.temperature));
   const mode = MODES.includes(params.mode) ? params.mode : 'single';
   // 内部一律用服务 id 作身份标识（缺 sid 时回退到 port，行为与旧版一致）
   const _target = svc(params.sid != null ? params.sid : params.port);
@@ -966,7 +966,7 @@ h2{font-size:15px;margin-bottom:8px}
     <div class="row">
       <div><label>每类轮数</label><select id="reps"><option>1</option><option selected>3</option><option>5</option></select></div>
       <div><label>max_tokens</label><input id="mt" value="700" type="number"></div>
-      <div><label>温度</label><input id="temp" value="1.0" type="number" step="0.05" min="0" max="2" title="采样温度，默认 1.0（官方思考模式推荐）；0=贪心，投机解码接受率最高。历史数据（2026-09-26 前）均为 0。"></div>
+      <div><label>温度</label><input id="temp" value="0" type="number" step="0.05" min="0" max="2" title="采样温度，默认 0（贪心，投机解码接受率最高）；历史数据均为 0。历史数据（2026-09-26 前）均为 0。"></div>
     </div>
     <div id="concWrap" style="display:none">
       <label>并发档位</label>
@@ -1141,7 +1141,7 @@ document.getElementById('go').onclick=function(){
   var body={mode:mode,port:selSvc.port,sid:selSvc.id,model:selModel,suite:document.getElementById('suite').value,
     reps:reps,concLevels:selConc,
     maxTokens:+document.getElementById('mt').value||700,
-    temperature:(document.getElementById('temp').value===''||isNaN(+document.getElementById('temp').value))?1.0:Math.min(2,Math.max(0,+document.getElementById('temp').value)),
+    temperature:(document.getElementById('temp').value===''||isNaN(+document.getElementById('temp').value))?0:Math.min(2,Math.max(0,+document.getElementById('temp').value)),
     settle:+document.getElementById('settle').value||0,
     repSettle:isNaN(+document.getElementById('repSettle').value)?3:+document.getElementById('repSettle').value,
     roundIso:document.getElementById('roundIso').checked,
