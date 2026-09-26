@@ -292,12 +292,12 @@ async function roundIsolate(port, state, label) {
 
 // ---------- streaming chat ----------
 // cb(tokens, elapsedMs)：每 20 个 token 回调一次，供实时监控显示本轮进度
-async function streamChat(port, model, prompt, maxTokens, signal, cb) {
+async function streamChat(port, model, prompt, maxTokens, temperature, signal, cb) {
   const t0 = Date.now();
   let ttft = null, tokens = 0;
   const body = JSON.stringify({
     model, messages: [{ role: 'user', content: prompt }],
-    max_tokens: maxTokens, temperature: 0, stream: true,
+    max_tokens: maxTokens, temperature: (temperature == null || !Number.isFinite(+temperature)) ? 1.0 : +temperature, stream: true,
     stream_options: { include_usage: true },
   });
   const res = await fetch(`${baseUrl(port)}/v1/chat/completions`, {
@@ -475,6 +475,9 @@ function buildFinal(mode, state, repsUsed) {
 
 async function runBench(params) {
   const { model, suite, reps, concLevels, maxTokens, settle, repSettle, tag, prefill } = params;
+  // 采样温度：缺省 1.0（Qwen3.8 官方思考模式推荐）；历史版本硬编码 0（贪心），对比旧数据时注意口径
+  const temperature = (params.temperature == null || params.temperature === '' || !Number.isFinite(+params.temperature))
+    ? 1.0 : Math.min(2, Math.max(0, +params.temperature));
   const mode = MODES.includes(params.mode) ? params.mode : 'single';
   // 内部一律用服务 id 作身份标识（缺 sid 时回退到 port，行为与旧版一致）
   const _target = svc(params.sid != null ? params.sid : params.port);
@@ -525,7 +528,7 @@ async function runBench(params) {
     state.stage = 'warmup';
     state.stageNote = '预热请求';
     for (let w = 0; w < 3; w++) {
-      try { await streamChat(port, model, '你好', 20, runAc.signal); break; }
+      try { await streamChat(port, model, '你好', 20, temperature, runAc.signal); break; }
       catch (e) {
         if (state.abort) throw new Error('aborted');
         if (w === 2) throw e;
@@ -561,7 +564,7 @@ async function runBench(params) {
           state.cur = { phase: '单流', name: p.name, rep: r + 1, reps, tokens: 0, t0: Date.now() };
           const before = await getMetrics(port);
           const pmt = roundIso ? state.salt + 'r' + (r + 1) + '\n' + p.prompt : p.prompt;
-          const out = await streamChat(port, model, pmt, maxTokens, runAc.signal,
+          const out = await streamChat(port, model, pmt, maxTokens, temperature, runAc.signal,
             (tk) => { if (state.cur) state.cur.tokens = tk; });
           const after = await getMetrics(port);
           const d = metricsDelta(before, after);
@@ -606,7 +609,7 @@ async function runBench(params) {
           for (let i = 0; i < c; i++) {
             const p = prompts[(i + r * c) % prompts.length];
             const pmt = roundIso ? state.salt + 'r' + (r + 1) + 'j' + i + '\n' + p.prompt : p.prompt;
-            jobs.push(streamChat(port, model, pmt, maxTokens, ac.signal,
+            jobs.push(streamChat(port, model, pmt, maxTokens, temperature, ac.signal,
               (tk) => { if (state.cur) state.cur.tokens = Math.max(state.cur.tokens, tk) + 0; })
               .then(o => { if (state.cur) state.cur.done++; return o; })
               .catch(e => { if (state.cur) state.cur.done++; return { err: String(e.message || e) }; }));
@@ -703,7 +706,7 @@ async function runBench(params) {
     const record = {
       file, tag: tag || 'run', mode, timestamp: new Date().toISOString(),
       service: svc(port) || { port, name: port },
-      model, params: { suite, reps, concLevels, maxTokens, settle, repSettle: isoSettle, roundIso, prefill: prefill || null },
+      model, params: { suite, reps, concLevels, maxTokens, settle, repSettle: isoSettle, roundIso, temperature, prefill: prefill || null },
       single: state.single, conc: state.conc, prefill: state.prefill,
       summary: state.summary, final: state.final, events: state.events,
       order: state.order,
@@ -963,6 +966,7 @@ h2{font-size:15px;margin-bottom:8px}
     <div class="row">
       <div><label>每类轮数</label><select id="reps"><option>1</option><option selected>3</option><option>5</option></select></div>
       <div><label>max_tokens</label><input id="mt" value="700" type="number"></div>
+      <div><label>温度</label><input id="temp" value="1.0" type="number" step="0.05" min="0" max="2" title="采样温度，默认 1.0（官方思考模式推荐）；0=贪心，投机解码接受率最高。历史数据（2026-09-26 前）均为 0。"></div>
     </div>
     <div id="concWrap" style="display:none">
       <label>并发档位</label>
@@ -1137,6 +1141,7 @@ document.getElementById('go').onclick=function(){
   var body={mode:mode,port:selSvc.port,sid:selSvc.id,model:selModel,suite:document.getElementById('suite').value,
     reps:reps,concLevels:selConc,
     maxTokens:+document.getElementById('mt').value||700,
+    temperature:(document.getElementById('temp').value===''||isNaN(+document.getElementById('temp').value))?1.0:Math.min(2,Math.max(0,+document.getElementById('temp').value)),
     settle:+document.getElementById('settle').value||0,
     repSettle:isNaN(+document.getElementById('repSettle').value)?3:+document.getElementById('repSettle').value,
     roundIso:document.getElementById('roundIso').checked,
@@ -1509,7 +1514,7 @@ function openDetail(file){
         [tpss.length?(Math.max.apply(null,tpss)-Math.min.apply(null,tpss)).toFixed(1):'—','最快-最慢极差 tok/s'],
         [(j.summary&&j.summary.prefixHit!=null)?j.summary.prefixHit+'%':'—','前缀缓存命中'],
         [(j.summary&&j.summary.accept!=null)?j.summary.accept+'%':'—','全程投机接受率'],
-        [p.maxTokens||'—','max_tokens']]);
+        [p.maxTokens||'—','max_tokens'],[p.temperature!=null?p.temperature:'0（旧版硬编码）','温度']]);
       html+='<div class="dCap">decode tok/s（按快慢排序）</div><div class="chartbox" style="height:'+Math.max(160,rows.length*26+40)+'px"><canvas id="chD1"></canvas></div>';
       html+='<div class="dCap">TTFT ms（同一顺序）</div><div class="chartbox" style="height:'+Math.max(150,rows.length*26+40)+'px"><canvas id="chD2"></canvas></div>';
       var maxT=Math.max.apply(null,tpss)||1;
